@@ -18,7 +18,21 @@ import { session } from '../stores/session';
 type Step = 'details' | 'channel' | 'code' | 'done';
 
 const router = useRouter();
-const t = copy.register.steps;
+// Getters, so the text follows the language switch instead of freezing at setup.
+const t = {
+  get details() {
+    return copy.register.steps.details;
+  },
+  get channel() {
+    return copy.register.steps.channel;
+  },
+  get code() {
+    return copy.register.steps.code;
+  },
+  get done() {
+    return copy.register.steps.done;
+  },
+};
 
 const step = ref<Step>('details');
 const channels = ref<OtpChannel[]>(['email']);
@@ -79,6 +93,8 @@ function applyApiError(err: unknown): void {
     return;
   }
   Object.assign(errors, err.fieldErrors());
+  // The API's field text is English; its error code maps to the current language.
+  if (err.code === 'INVALID_PHONE' || err.code === 'PHONE_REQUIRED') errors.phone = err.message;
   if (err.code === 'OTP_COOLDOWN') {
     const wait = Number(err.details?.retryAfterSeconds ?? 0);
     if (wait > 0) resendAt.value = Date.now() + wait * 1000;

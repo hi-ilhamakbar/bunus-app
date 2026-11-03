@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import BunusMark from '../components/BunusMark.vue';
+import { copy } from '../copy';
 </script>
 
 <template>
   <main id="main" class="nf">
     <BunusMark :size="48" />
-    <h1>This page doesn't exist</h1>
-    <p class="muted">The link may be old, or typed a little differently.</p>
-    <RouterLink to="/" class="btn btn-primary">Go to Bunus home</RouterLink>
+    <h1>{{ copy.notFound.title }}</h1>
+    <p class="muted">{{ copy.notFound.body }}</p>
+    <RouterLink to="/" class="btn btn-primary">{{ copy.notFound.home }}</RouterLink>
   </main>
 </template>
 

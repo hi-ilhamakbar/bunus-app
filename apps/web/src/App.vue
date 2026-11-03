@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { copy } from './i18n';
 </script>
 
 <template>
-  <a class="skip" href="#main">Skip to content</a>
+  <a class="skip" href="#main">{{ copy.common.skip }}</a>
   <RouterView />
 </template>
 

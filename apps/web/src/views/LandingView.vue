@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BunusMark from '../components/BunusMark.vue';
+import LocaleSwitch from '../components/LocaleSwitch.vue';
 import StampCard from '../components/StampCard.vue';
 import { copy } from '../copy';
 </script>
@@ -7,11 +8,14 @@ import { copy } from '../copy';
 <template>
   <div class="page">
     <header class="top">
-      <RouterLink to="/" class="brand" aria-label="Bunus home">
+      <RouterLink to="/" class="brand" :aria-label="copy.common.home">
         <BunusMark :size="34" />
         <span class="word">Bunus</span>
       </RouterLink>
-      <RouterLink to="/member/login" class="login">{{ copy.landing.login }}</RouterLink>
+      <div class="right">
+        <LocaleSwitch />
+        <RouterLink to="/member/login" class="login">{{ copy.landing.login }}</RouterLink>
+      </div>
     </header>
 
     <main id="main" class="hero" tabindex="-1">
@@ -28,7 +32,7 @@ import { copy } from '../copy';
         <div class="tilt">
           <StampCard
             :title="copy.landing.sampleName"
-            note="5 of 8 stamps"
+            :note="copy.landing.sampleNote"
             :count="8"
             :filled="5"
             :columns="4"
@@ -67,6 +71,11 @@ import { copy } from '../copy';
   font-family: var(--font-heading);
   font-weight: 700;
   font-size: 21px;
+}
+.right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
 }
 .login {
   font-weight: 600;

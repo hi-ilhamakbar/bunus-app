@@ -20,7 +20,7 @@ const fields = reactive<{ email?: string; password?: string }>({});
 async function submit(): Promise<void> {
   formError.value = '';
   fields.email = form.email.includes('@') ? undefined : copy.errors.emailInvalid;
-  fields.password = form.password ? undefined : 'Enter your password.';
+  fields.password = form.password ? undefined : copy.login.passwordRequired;
   if (fields.email || fields.password) return;
 
   busy.value = true;

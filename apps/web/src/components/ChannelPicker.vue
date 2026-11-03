@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Check, Mail, MessageCircle, Smartphone } from 'lucide-vue-next';
 import type { OtpChannel } from '../api/client';
 import { copy } from '../copy';
@@ -6,12 +7,14 @@ import { copy } from '../copy';
 defineProps<{ modelValue: OtpChannel; channels: readonly OtpChannel[]; legend: string }>();
 const emit = defineEmits<{ 'update:modelValue': [value: OtpChannel] }>();
 
-const c = copy.register.steps.channel;
-const META: Record<OtpChannel, { name: string; hint: string; icon: typeof Mail }> = {
-  email: { name: c.email, hint: c.emailHint, icon: Mail },
-  whatsapp: { name: c.whatsapp, hint: c.phoneHint, icon: MessageCircle },
-  sms: { name: c.sms, hint: c.phoneHint, icon: Smartphone },
-};
+const META = computed<Record<OtpChannel, { name: string; hint: string; icon: typeof Mail }>>(() => {
+  const c = copy.register.steps.channel;
+  return {
+    email: { name: c.email, hint: c.emailHint, icon: Mail },
+    whatsapp: { name: c.whatsapp, hint: c.phoneHint, icon: MessageCircle },
+    sms: { name: c.sms, hint: c.phoneHint, icon: Smartphone },
+  };
+});
 </script>
 
 <template>

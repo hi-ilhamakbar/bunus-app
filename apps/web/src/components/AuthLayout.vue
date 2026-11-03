@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import BunusMark from './BunusMark.vue';
 import { copy } from '../copy';
+import LocaleSwitch from './LocaleSwitch.vue';
 </script>
 
 <template>
   <div class="shell">
     <aside class="panel">
-      <RouterLink to="/" class="brand" aria-label="Bunus home">
-        <BunusMark :size="36" />
-        <span class="word">Bunus</span>
-      </RouterLink>
+      <div class="bar">
+        <RouterLink to="/" class="brand" :aria-label="copy.common.home">
+          <BunusMark :size="36" />
+          <span class="word">Bunus</span>
+        </RouterLink>
+        <LocaleSwitch on-dark />
+      </div>
       <p class="tagline">{{ copy.tagline }}</p>
       <div class="card-slot">
         <slot name="card" />
@@ -38,6 +42,12 @@ import { copy } from '../copy';
   display: flex;
   flex-direction: column;
   gap: 28px;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .brand {
   display: inline-flex;
