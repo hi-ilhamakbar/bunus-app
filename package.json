@@ -4,6 +4,9 @@
   "private": true,
   "description": "Bunus.app - multi-tenant digital loyalty platform",
   "license": "MIT",
+  "overrides": {
+    "rxjs": "7.8.1"
+  },
   "engines": {
     "node": ">=22"
   },

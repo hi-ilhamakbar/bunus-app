@@ -146,7 +146,7 @@ describe('OtpIdProvider.verify', () => {
         throw apiError('OTP_EXPIRED');
       },
     });
-    const err = await otp.verify({ otpId: '1', code: '987654' }).catch((e: unknown) => e as Error);
+    const err = (await otp.verify({ otpId: '1', code: '987654' }).catch((e: unknown) => e)) as Error;
     expect(err.message).not.toContain('987654');
   });
 });
