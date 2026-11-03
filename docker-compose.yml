@@ -1,0 +1,41 @@
+# Local development stack. Production on a VPS reuses the same images.
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-bunus_root_dev}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-bunus}
+      MYSQL_USER: ${MYSQL_USER:-bunus}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-bunus_dev}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-p${MYSQL_ROOT_PASSWORD:-bunus_root_dev}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    profiles: ['app']
+    env_file: .env
+    environment:
+      DATABASE_URL: mysql://${MYSQL_USER:-bunus}:${MYSQL_PASSWORD:-bunus_dev}@db:3306/${MYSQL_DATABASE:-bunus}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
+
+volumes:
+  mysql-data:

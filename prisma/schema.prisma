@@ -1,0 +1,282 @@
+// Bunus.app database schema (Phase 0: identity, signup, sessions, tenants, RBAC, audit).
+// Loyalty ledger, rewards, referral and subscription models are added in later steps.
+//
+// Conventions
+// - Public IDs are UUID strings. Sequential IDs are never exposed.
+// - All timestamps are stored in UTC.
+// - Every merchant-scoped table carries merchantId (tenant ownership).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Customers (one global account, many merchant memberships later)
+// ---------------------------------------------------------------------------
+
+enum CustomerStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum IdentityType {
+  EMAIL
+  PHONE
+}
+
+model Customer {
+  id           String         @id @default(uuid()) @db.VarChar(36)
+  displayName  String         @db.VarChar(120)
+  passwordHash String         @db.VarChar(255)
+  status       CustomerStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  identities CustomerIdentity[]
+  sessions   Session[]
+
+  @@map("customers")
+}
+
+// A customer can have several identities (email, phone). The (type, value) pair is globally unique,
+// so one email or phone number can never belong to two accounts.
+model CustomerIdentity {
+  id         String       @id @default(uuid()) @db.VarChar(36)
+  customerId String       @db.VarChar(36)
+  type       IdentityType
+  value      String       @db.VarChar(255) // email lower-cased; phone as E.164 digits without '+'
+  verifiedAt DateTime?
+  createdAt  DateTime     @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([type, value])
+  @@index([customerId])
+  @@map("customer_identities")
+}
+
+// ---------------------------------------------------------------------------
+// Signup in progress. No Customer row exists until the OTP is verified.
+// ---------------------------------------------------------------------------
+
+enum OtpChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+}
+
+model PendingSignup {
+  id           String     @id @default(uuid()) @db.VarChar(36)
+  email        String     @unique @db.VarChar(255) // normalised; one pending signup per email
+  displayName  String     @db.VarChar(120)
+  passwordHash String     @db.VarChar(255)
+  phone        String?    @db.VarChar(32)
+  channel      OtpChannel
+  destination  String     @db.VarChar(255) // email address or phone digits the code goes to
+
+  // Provider transaction for the latest code. Needed by the provider's verify call.
+  otpId        String?  @db.VarChar(128)
+  // Bumped on every (re)send; combined with id to build an idempotent external_id.
+  sendSeq      Int      @default(0)
+  resendCount  Int      @default(0)
+  lastSentAt   DateTime?
+  wrongCodes   Int      @default(0)
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdIp    String?  @db.VarChar(64)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([destination, lastSentAt])
+  @@map("pending_signups")
+}
+
+// ---------------------------------------------------------------------------
+// Sessions (opaque token; only its SHA-256 hash is stored)
+// ---------------------------------------------------------------------------
+
+model Session {
+  id         String    @id @default(uuid()) @db.VarChar(36)
+  tokenHash  String    @unique @db.VarChar(64)
+  customerId String?   @db.VarChar(36)
+  userId     String?   @db.VarChar(36)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  ip         String?   @db.VarChar(64)
+  userAgent  String?   @db.VarChar(255)
+  createdAt  DateTime  @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Platform + merchant staff accounts, tenants, RBAC
+// ---------------------------------------------------------------------------
+
+enum UserKind {
+  PLATFORM_ADMIN
+  MERCHANT_USER
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.VarChar(36)
+  kind         UserKind
+  email        String     @unique @db.VarChar(255)
+  displayName  String     @db.VarChar(120)
+  passwordHash String?    @db.VarChar(255) // null until the invited user sets their own password
+  status       UserStatus @default(INVITED)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sessions    Session[]
+  assignments UserRoleAssignment[]
+
+  @@map("users")
+}
+
+enum MerchantStatus {
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+}
+
+model Merchant {
+  id        String         @id @default(uuid()) @db.VarChar(36)
+  slug      String         @unique @db.VarChar(64) // public /m/:slug
+  name      String         @db.VarChar(160)
+  status    MerchantStatus @default(ONBOARDING)
+  timezone  String         @default("Asia/Jakarta") @db.VarChar(64)
+  currency  String         @default("IDR") @db.VarChar(3)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  branches    Branch[]
+  roles       Role[]
+  assignments UserRoleAssignment[]
+
+  @@map("merchants")
+}
+
+model Branch {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  merchantId String   @db.VarChar(36)
+  name       String   @db.VarChar(160)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  merchant    Merchant             @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  assignments UserRoleAssignment[]
+
+  @@index([merchantId])
+  @@map("branches")
+}
+
+enum RoleScope {
+  PLATFORM
+  MERCHANT
+}
+
+model Role {
+  id         String    @id @default(uuid()) @db.VarChar(36)
+  key        String    @db.VarChar(64) // e.g. merchant_owner, branch_manager, staff
+  name       String    @db.VarChar(120)
+  scope      RoleScope
+  merchantId String?   @db.VarChar(36) // null = built-in role shared by all merchants
+  createdAt  DateTime  @default(now())
+
+  merchant    Merchant?            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  assignments UserRoleAssignment[]
+
+  @@unique([merchantId, key])
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.VarChar(36)
+  key         String @unique @db.VarChar(96) // e.g. stamps.issue, rewards.manage
+  description String @db.VarChar(255)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @db.VarChar(36)
+  permissionId String @db.VarChar(36)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// Staff are limited to the branches they are assigned to (branchId set); owners/managers have none.
+model UserRoleAssignment {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  userId     String   @db.VarChar(36)
+  roleId     String   @db.VarChar(36)
+  merchantId String?  @db.VarChar(36) // null only for platform roles
+  branchId   String?  @db.VarChar(36)
+  createdAt  DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  merchant Merchant? @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  branch   Branch?   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([merchantId])
+  @@map("user_role_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail. Append-only: corrections are new rows, never edits.
+// ---------------------------------------------------------------------------
+
+enum ActorType {
+  CUSTOMER
+  USER
+  SYSTEM
+}
+
+model AuditLog {
+  id         String    @id @default(uuid()) @db.VarChar(36)
+  actorType  ActorType
+  actorId    String?   @db.VarChar(36)
+  action     String    @db.VarChar(96) // e.g. customer.signup.completed
+  targetType String?   @db.VarChar(64)
+  targetId   String?   @db.VarChar(64)
+  merchantId String?   @db.VarChar(36)
+  before     Json?
+  after      Json?
+  reason     String?   @db.VarChar(255)
+  ip         String?   @db.VarChar(64)
+  createdAt  DateTime  @default(now())
+
+  @@index([action, createdAt])
+  @@index([merchantId, createdAt])
+  @@index([actorType, actorId])
+  @@map("audit_logs")
+}
