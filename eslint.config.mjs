@@ -4,10 +4,11 @@ import tseslint from 'typescript-eslint';
 import pluginVue from 'eslint-plugin-vue';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', 'prisma/migrations/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', 'prisma/migrations/**', 'release/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  ...pluginVue.configs['flat/recommended'],
+  // Formatting is Prettier's job; only the Vue plugin's correctness rules are used.
+  ...pluginVue.configs['flat/essential'],
   {
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
     rules: {
