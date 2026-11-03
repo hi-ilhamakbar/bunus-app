@@ -1,0 +1,38 @@
+name: Build for deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No package-lock.json yet, so npm ci is not possible. The lock file is uploaded below: commit it.
+      - run: npm install
+      - run: npm run prisma:generate
+        env:
+          DATABASE_URL: mysql://ci:ci@localhost:3306/ci
+      - run: npm run build
+      - run: node scripts/make-api-bundle.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bunus-web
+          path: apps/web/dist
+          include-hidden-files: true
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bunus-api
+          path: release/bunus-api
+          include-hidden-files: true
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-lock
+          path: package-lock.json

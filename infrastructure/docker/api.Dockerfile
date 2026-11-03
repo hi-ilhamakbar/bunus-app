@@ -2,10 +2,10 @@
 FROM node:22-slim AS build
 WORKDIR /repo
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json* ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
-RUN npm ci
+RUN npm install
 COPY tsconfig.base.json ./
 COPY prisma prisma
 COPY apps/api apps/api
