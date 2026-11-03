@@ -1,0 +1,9 @@
+# Single-page app on Apache/LiteSpeed (cPanel). Real files and /api go through; every other path loads index.html.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_URI} ^/api/ [OR]
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule ^ /index.html [L]
+</IfModule>
