@@ -1,3 +1,4 @@
+import { APIError, OtpIdClient } from '@otp-id/sdk';
 import {
   OtpProvider,
   OtpProviderError,
@@ -9,39 +10,35 @@ import {
 } from './otp-provider';
 
 /**
- * OTP.ID API V3 adapter, written against the integration brief (endpoints, bearer auth, response
- * envelope, error codes, verify semantics).
- *
- * VERIFY AGAINST https://docs.otp.id BEFORE GOING LIVE. These details were not stated in the brief
- * and could not be read when this was written (the docs host was not reachable from the build
- * sandbox). Each is isolated in this block so a correction is a one-line change:
+ * OTP.ID adapter on the official SDK (@otp-id/sdk). The SDK never retries; our idempotency comes from
+ * `external_id`, which is new for every real send and stable for a repeat of the same send.
  */
-const FIELDS = {
-  /** Body field that carries the code the user typed into POST /v3/verify. */
-  verifyCode: 'code',
-  /** Body field for the email address on POST /v3/request (the brief allows `number` or `email`). */
-  requestEmail: 'email',
-  /** Body field for the phone number on POST /v3/request. */
-  requestNumber: 'number',
-} as const;
 
-const REQUEST_TIMEOUT_MS = 10_000;
-
-interface Envelope<T> {
-  success?: boolean;
-  data?: T | null;
-  error?: { code?: string; message?: string } | null;
+/** The slice of the SDK client this adapter uses. Tests pass a stand-in. */
+export interface OtpIdClientLike {
+  requestOtp(params: {
+    channel: OtpRequestInput['channel'];
+    destination: string;
+    brand?: string;
+    external_id?: string;
+  }): Promise<{
+    otp_id: string | number;
+    status?: string;
+    last_balance?: number;
+    price?: number;
+    failure?: { code?: string; message?: string } | null;
+  }>;
+  verifyOtp(otpId: string, code: string): Promise<{ verified: boolean; reason?: string }>;
 }
 
-interface RequestData {
-  otp_id?: string | number;
-  price?: number;
-  last_balance?: number;
-}
-
-interface VerifyData {
-  verified?: boolean;
-  reason?: string;
+export interface OtpIdProviderOptions {
+  apiKey: string;
+  baseUrl: string;
+  /** Shown in the message the person receives. */
+  brand?: string;
+  timeoutMs?: number;
+  /** Injectable for tests. */
+  client?: OtpIdClientLike;
 }
 
 const ERROR_KINDS: Record<string, OtpErrorKind> = {
@@ -55,91 +52,87 @@ const ERROR_KINDS: Record<string, OtpErrorKind> = {
   ALREADY_USED: 'ALREADY_USED',
 };
 
-export interface OtpIdProviderOptions {
-  apiKey: string;
-  baseUrl: string;
-  /** Injectable for tests. */
-  fetchImpl?: typeof fetch;
+type ApiErrorShape = Error & { code: string; details?: Record<string, unknown> };
+
+function isApiError(err: unknown): err is ApiErrorShape {
+  if (err instanceof APIError) return true;
+  // Duck-typed so a different copy of the SDK (or a test double) is still recognised.
+  return err instanceof Error && typeof (err as { code?: unknown }).code === 'string' && err.name === 'APIError';
 }
 
 export class OtpIdProvider extends OtpProvider {
-  private readonly fetchImpl: typeof fetch;
+  private readonly client: OtpIdClientLike;
+  private readonly brand: string;
 
-  constructor(private readonly options: OtpIdProviderOptions) {
+  constructor(options: OtpIdProviderOptions) {
     super();
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.brand = options.brand ?? 'Bunus';
+    this.client =
+      options.client ??
+      (new OtpIdClient(options.apiKey, {
+        baseURL: options.baseUrl,
+        timeoutMs: options.timeoutMs ?? 10_000,
+      }) as unknown as OtpIdClientLike);
   }
 
   async request(input: OtpRequestInput): Promise<OtpRequestResult> {
-    const body: Record<string, unknown> = {
-      channel: input.channel,
-      external_id: input.externalId,
-    };
-    body[input.channel === 'email' ? FIELDS.requestEmail : FIELDS.requestNumber] = input.destination;
+    try {
+      const res = await this.client.requestOtp({
+        channel: input.channel,
+        destination: input.destination,
+        brand: this.brand,
+        external_id: input.externalId,
+      });
 
-    const data = await this.post<RequestData>('/v3/request', body);
-    if (data.otp_id === undefined || data.otp_id === null || data.otp_id === '') {
-      throw new OtpProviderError('UNAVAILABLE', 'OTP.ID response had no otp_id');
+      // A failed delivery is a normal response in this API, not an exception.
+      if (res.status === 'failed') {
+        const code = res.failure?.code;
+        // "Number not on WhatsApp" and similar are about the destination, not about us.
+        const kind: OtpErrorKind = code && /NUMBER|DESTINATION/i.test(code) ? 'INVALID_NUMBER' : 'UNAVAILABLE';
+        throw new OtpProviderError(kind, `OTP.ID could not deliver the code: ${code ?? 'unknown'}`, code);
+      }
+
+      return this.toRequestResult(res.otp_id, res.price, res.last_balance);
+    } catch (err) {
+      // A repeat of a send we already made: carry on with the original transaction.
+      if (isApiError(err) && err.code === 'DUPLICATE_EXTERNAL_ID') {
+        const existing = err.details?.existing_otp_id;
+        if (typeof existing === 'string' || typeof existing === 'number') return this.toRequestResult(existing);
+      }
+      throw this.toProviderError(err);
     }
-    return {
-      otpId: String(data.otp_id),
-      price: typeof data.price === 'number' ? data.price : undefined,
-      lastBalance: typeof data.last_balance === 'number' ? data.last_balance : undefined,
-    };
   }
 
   async verify(input: OtpVerifyInput): Promise<OtpVerifyResult> {
-    const data = await this.post<VerifyData>('/v3/verify', {
-      otp_id: input.otpId,
-      [FIELDS.verifyCode]: input.code,
-    });
-    // A wrong code is HTTP 200 with verified:false, not an error. Branch on `verified` only.
-    return { verified: data.verified === true, reason: data.reason };
+    try {
+      // A wrong code resolves with verified:false. Expired, locked and used codes throw.
+      const res = await this.client.verifyOtp(input.otpId, input.code);
+      return { verified: res.verified === true, reason: res.reason };
+    } catch (err) {
+      throw this.toProviderError(err);
+    }
   }
 
-  private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    let res: Response;
-    try {
-      res = await this.fetchImpl(`${this.options.baseUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.options.apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch {
-      throw new OtpProviderError('UNAVAILABLE', 'OTP.ID could not be reached');
+  private toRequestResult(otpId: string | number | undefined, price?: number, lastBalance?: number): OtpRequestResult {
+    if (otpId === undefined || otpId === null || otpId === '') {
+      throw new OtpProviderError('UNAVAILABLE', 'OTP.ID response had no otp_id');
     }
-
-    let envelope: Envelope<T> | null = null;
-    try {
-      envelope = (await res.json()) as Envelope<T>;
-    } catch {
-      envelope = null;
-    }
-
-    if (res.ok && envelope?.success !== false && envelope?.data) {
-      return envelope.data;
-    }
-    throw this.toError(res.status, envelope);
+    return {
+      otpId: String(otpId),
+      price: typeof price === 'number' ? price : undefined,
+      lastBalance: typeof lastBalance === 'number' ? lastBalance : undefined,
+    };
   }
 
-  /** Never put request bodies in the message: they contain the destination and the typed code. */
-  private toError(status: number, envelope: Envelope<unknown> | null): OtpProviderError {
-    const providerCode = envelope?.error?.code;
-    const mapped = providerCode ? ERROR_KINDS[providerCode] : undefined;
-    if (mapped) {
-      return new OtpProviderError(mapped, `OTP.ID rejected the call: ${providerCode}`, providerCode);
+  /** Never put request data in the message: it holds the destination and the typed code. */
+  private toProviderError(err: unknown): OtpProviderError {
+    if (err instanceof OtpProviderError) return err;
+    if (isApiError(err)) {
+      const mapped = ERROR_KINDS[err.code];
+      if (mapped) return new OtpProviderError(mapped, `OTP.ID rejected the call: ${err.code}`, err.code);
+      return new OtpProviderError('UNAVAILABLE', `OTP.ID returned ${err.code}`, err.code);
     }
-    if (status === 401 || status === 403) {
-      return new OtpProviderError('UNAUTHORIZED', 'OTP.ID refused the API key', providerCode);
-    }
-    if (status === 429) {
-      return new OtpProviderError('RATE_LIMITED', 'OTP.ID rate limit reached', providerCode);
-    }
-    return new OtpProviderError('UNAVAILABLE', `OTP.ID returned HTTP ${status}`, providerCode);
+    // Network error, timeout, or the SDK refusing an empty key/id.
+    return new OtpProviderError('UNAVAILABLE', 'OTP.ID could not be reached');
   }
 }

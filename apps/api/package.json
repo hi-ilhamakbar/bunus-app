@@ -15,6 +15,7 @@
     "@nestjs/core": "^10.4.0",
     "@nestjs/platform-express": "^10.4.0",
     "@nestjs/swagger": "^8.0.0",
+    "@otp-id/sdk": "*",
     "@nestjs/throttler": "^6.2.1",
     "@node-rs/argon2": "^2.0.0",
     "@prisma/client": "^6.0.0",

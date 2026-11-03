@@ -1,106 +1,151 @@
-import { OtpIdProvider } from './otpid.provider';
+import { OtpIdProvider, type OtpIdClientLike } from './otpid.provider';
 import { OtpProviderError } from './otp-provider';
 
-type Call = { url: string; init: RequestInit };
+type Params = Parameters<OtpIdClientLike['requestOtp']>[0];
 
-function provider(respond: () => Response | Promise<Response>): { otp: OtpIdProvider; calls: Call[] } {
-  const calls: Call[] = [];
-  const fetchImpl = (async (url: string, init: RequestInit) => {
-    calls.push({ url, init });
-    return respond();
-  }) as unknown as typeof fetch;
-  return { otp: new OtpIdProvider({ apiKey: 'test-key', baseUrl: 'https://api.otp.test', fetchImpl }), calls };
+function apiError(code: string, details?: Record<string, unknown>): Error {
+  return Object.assign(new Error(`${code} (message may contain 987654)`), { name: 'APIError', code, details });
 }
 
-const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
+function build(overrides: Partial<OtpIdClientLike> = {}): { otp: OtpIdProvider; sent: Params[]; verified: unknown[][] } {
+  const sent: Params[] = [];
+  const verified: unknown[][] = [];
+  const client: OtpIdClientLike = {
+    requestOtp: async (params) => {
+      sent.push(params);
+      return { otp_id: 12345, status: 'sent', price: 350, last_balance: 99000 };
+    },
+    verifyOtp: async (...args) => {
+      verified.push(args);
+      return { verified: true };
+    },
+    ...overrides,
+  };
+  return { otp: new OtpIdProvider({ apiKey: 'k', baseUrl: 'https://api.otp.test', client }), sent, verified };
+}
 
 describe('OtpIdProvider.request', () => {
-  it('posts to /v3/request with bearer auth, external_id and the phone in `number`', async () => {
-    const { otp, calls } = provider(() =>
-      json({ success: true, data: { otp_id: 12345, price: 350, last_balance: 99000 }, error: null }),
-    );
-
+  it('sends channel, destination, brand and external_id, and maps the result', async () => {
+    const { otp, sent } = build();
     const result = await otp.request({ channel: 'whatsapp', destination: '6281234567890', externalId: 'signup:a:1' });
-
     expect(result).toEqual({ otpId: '12345', price: 350, lastBalance: 99000 });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe('https://api.otp.test/v3/request');
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe('Bearer test-key');
-    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({
-      channel: 'whatsapp',
-      external_id: 'signup:a:1',
-      number: '6281234567890',
+    expect(sent).toEqual([
+      { channel: 'whatsapp', destination: '6281234567890', brand: 'Bunus', external_id: 'signup:a:1' },
+    ]);
+  });
+
+  it('uses the same destination field for email', async () => {
+    const { otp, sent } = build();
+    await otp.request({ channel: 'email', destination: 'a@b.co', externalId: 'e' });
+    expect(sent[0]).toMatchObject({ channel: 'email', destination: 'a@b.co' });
+  });
+
+  it('treats status "failed" as an error even though the call resolved', async () => {
+    const { otp } = build({
+      requestOtp: async () => ({
+        otp_id: 1,
+        status: 'failed',
+        failure: { code: 'NUMBER_NOT_ON_WHATSAPP', message: 'x' },
+      }),
+    });
+    await expect(otp.request({ channel: 'whatsapp', destination: '62', externalId: 'e' })).rejects.toMatchObject({
+      kind: 'INVALID_NUMBER',
     });
   });
 
-  it('sends the address in `email` for the email channel', async () => {
-    const { otp, calls } = provider(() => json({ success: true, data: { otp_id: 'abc' }, error: null }));
-    await otp.request({ channel: 'email', destination: 'a@b.co', externalId: 'signup:a:1' });
-    expect(JSON.parse(calls[0]?.init.body as string)).toMatchObject({ channel: 'email', email: 'a@b.co' });
-  });
-
-  it.each([
-    ['INSUFFICIENT_BALANCE', 402, 'INSUFFICIENT_BALANCE'],
-    ['RATE_LIMITED', 429, 'RATE_LIMITED'],
-    ['DESTINATION_RATE_LIMITED', 429, 'DESTINATION_RATE_LIMITED'],
-    ['INVALID_NUMBER', 422, 'INVALID_NUMBER'],
-    ['UNAUTHORIZED', 401, 'UNAUTHORIZED'],
-  ])('maps provider error %s to kind %s', async (code, status, kind) => {
-    const { otp } = provider(() => json({ success: false, data: null, error: { code, message: 'x' } }, status));
-    await expect(otp.request({ channel: 'sms', destination: '6281', externalId: 'e' })).rejects.toMatchObject({
-      name: 'OtpProviderError',
-      kind,
+  it('treats other delivery failures as UNAVAILABLE', async () => {
+    const { otp } = build({
+      requestOtp: async () => ({ otp_id: 1, status: 'failed', failure: { code: 'PROVIDER_ERROR' } }),
     });
-  });
-
-  it('treats an unreachable provider as UNAVAILABLE', async () => {
-    const { otp } = provider(() => {
-      throw new TypeError('fetch failed');
-    });
-    await expect(otp.request({ channel: 'sms', destination: '6281', externalId: 'e' })).rejects.toMatchObject({
+    await expect(otp.request({ channel: 'sms', destination: '62', externalId: 'e' })).rejects.toMatchObject({
       kind: 'UNAVAILABLE',
     });
   });
 
-  it('rejects a success response that has no otp_id', async () => {
-    const { otp } = provider(() => json({ success: true, data: {}, error: null }));
-    await expect(otp.request({ channel: 'sms', destination: '6281', externalId: 'e' })).rejects.toBeInstanceOf(
+  it.each([
+    'INSUFFICIENT_BALANCE',
+    'RATE_LIMITED',
+    'DESTINATION_RATE_LIMITED',
+    'INVALID_NUMBER',
+    'UNAUTHORIZED',
+  ])('maps API error %s to the same kind', async (code) => {
+    const { otp } = build({
+      requestOtp: async () => {
+        throw apiError(code);
+      },
+    });
+    await expect(otp.request({ channel: 'sms', destination: '62', externalId: 'e' })).rejects.toMatchObject({
+      name: 'OtpProviderError',
+      kind: code,
+    });
+  });
+
+  it('continues with the original transaction on DUPLICATE_EXTERNAL_ID', async () => {
+    const { otp } = build({
+      requestOtp: async () => {
+        throw apiError('DUPLICATE_EXTERNAL_ID', { existing_otp_id: 777 });
+      },
+    });
+    await expect(otp.request({ channel: 'sms', destination: '62', externalId: 'e' })).resolves.toMatchObject({
+      otpId: '777',
+    });
+  });
+
+  it('treats network failures and unknown codes as UNAVAILABLE', async () => {
+    const down = build({
+      requestOtp: async () => {
+        throw new TypeError('fetch failed');
+      },
+    });
+    await expect(down.otp.request({ channel: 'sms', destination: '62', externalId: 'e' })).rejects.toMatchObject({
+      kind: 'UNAVAILABLE',
+    });
+
+    const odd = build({
+      requestOtp: async () => {
+        throw apiError('SOMETHING_NEW');
+      },
+    });
+    await expect(odd.otp.request({ channel: 'sms', destination: '62', externalId: 'e' })).rejects.toMatchObject({
+      kind: 'UNAVAILABLE',
+    });
+  });
+
+  it('rejects a response without an otp_id', async () => {
+    const { otp } = build({ requestOtp: async () => ({ otp_id: '' }) });
+    await expect(otp.request({ channel: 'sms', destination: '62', externalId: 'e' })).rejects.toBeInstanceOf(
       OtpProviderError,
     );
   });
 });
 
 describe('OtpIdProvider.verify', () => {
-  it('returns verified:true on success', async () => {
-    const { otp, calls } = provider(() => json({ success: true, data: { verified: true }, error: null }));
+  it('passes otp_id and code and returns verified:true', async () => {
+    const { otp, verified } = build();
     await expect(otp.verify({ otpId: '12345', code: '654321' })).resolves.toEqual({ verified: true, reason: undefined });
-    expect(calls[0]?.url).toBe('https://api.otp.test/v3/verify');
-    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ otp_id: '12345', code: '654321' });
+    expect(verified).toEqual([['12345', '654321']]);
   });
 
-  it('treats a wrong code as a normal result, not an error', async () => {
-    const { otp } = provider(() =>
-      json({ success: true, data: { verified: false, reason: 'mismatch' }, error: null }),
-    );
-    await expect(otp.verify({ otpId: '1', code: '000000' })).resolves.toEqual({
-      verified: false,
-      reason: 'mismatch',
+  it('treats a wrong code as a normal result', async () => {
+    const { otp } = build({ verifyOtp: async () => ({ verified: false, reason: 'mismatch' }) });
+    await expect(otp.verify({ otpId: '1', code: '000000' })).resolves.toEqual({ verified: false, reason: 'mismatch' });
+  });
+
+  it.each(['OTP_EXPIRED', 'TOO_MANY_ATTEMPTS', 'ALREADY_USED'])('maps %s', async (code) => {
+    const { otp } = build({
+      verifyOtp: async () => {
+        throw apiError(code);
+      },
     });
+    await expect(otp.verify({ otpId: '1', code: '123456' })).rejects.toMatchObject({ kind: code });
   });
 
-  it.each([
-    ['OTP_EXPIRED', 'OTP_EXPIRED'],
-    ['TOO_MANY_ATTEMPTS', 'TOO_MANY_ATTEMPTS'],
-    ['ALREADY_USED', 'ALREADY_USED'],
-  ])('maps 422 %s to kind %s', async (code, kind) => {
-    const { otp } = provider(() => json({ success: false, data: null, error: { code, message: 'x' } }, 422));
-    await expect(otp.verify({ otpId: '1', code: '123456' })).rejects.toMatchObject({ kind });
-  });
-
-  it('never leaks the typed code or destination into error messages', async () => {
-    const { otp } = provider(() =>
-      json({ success: false, data: null, error: { code: 'OTP_EXPIRED', message: 'code 987654 expired' } }, 422),
-    );
+  it('never leaks the typed code into the error message', async () => {
+    const { otp } = build({
+      verifyOtp: async () => {
+        throw apiError('OTP_EXPIRED');
+      },
+    });
     const err = await otp.verify({ otpId: '1', code: '987654' }).catch((e: unknown) => e as Error);
     expect(err.message).not.toContain('987654');
   });
