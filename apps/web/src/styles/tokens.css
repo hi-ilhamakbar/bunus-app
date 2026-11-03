@@ -1,0 +1,60 @@
+/* Bunus design tokens. Source: Brand & Design System v1.0, plus the contrast fixes recorded in
+   docs/architecture/design-direction.md (marked "adjusted"). */
+:root {
+  /* Brand */
+  --bunus-emerald-800: #0b6b4f;
+  --bunus-emerald-700: #095a42; /* adjusted: hover state for Emerald 800 */
+  --bunus-emerald-900: #084a37; /* adjusted: pressed state */
+  --bunus-emerald-600: #10b981;
+  --bunus-emerald-100: #d1fae5;
+  --bunus-amber-400: #fbbf24; /* reward moments only */
+  --bunus-coral-400: #fb7185; /* promotions only */
+
+  /* Neutrals */
+  --bunus-gray-900: #111827;
+  --bunus-gray-700: #374151;
+  --bunus-gray-500: #6b7280;
+  --bunus-gray-300: #d1d5db;
+  --bunus-gray-100: #f3f4f6;
+  --bunus-white: #ffffff;
+
+  /* Semantic */
+  --bunus-success: #16a34a;
+  --bunus-warning: #d97706;
+  --bunus-error: #dc2626;
+  --bunus-error-text: #b91c1c; /* adjusted: 5.8:1 on Gray 100, the brand red is 4.4:1 */
+  --bunus-info: #2563eb;
+
+  /* Roles */
+  --page: var(--bunus-gray-100);
+  --surface: var(--bunus-white);
+  --text: var(--bunus-gray-900);
+  --text-muted: var(--bunus-gray-700); /* adjusted: Gray 500 fails on the Gray 100 page */
+  --text-faint: var(--bunus-gray-500); /* white surfaces only */
+  --control-border: var(--bunus-gray-500); /* adjusted: 3:1 against the page, Gray 300 is 1.5:1 */
+  --divider: var(--bunus-gray-300);
+  --action: var(--bunus-emerald-800);
+  --focus: var(--bunus-emerald-800);
+
+  /* Type */
+  --font-heading: 'Poppins', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  /* Shape */
+  --radius-input: 8px;
+  --radius-button: 10px;
+  --radius-ticket: 14px;
+  --radius-modal: 16px;
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --control-height: 48px;
+}
