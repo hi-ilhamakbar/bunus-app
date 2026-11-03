@@ -16,7 +16,8 @@ Confirm or correct these; each is cheap to change now.
 - Phone number is required only when WhatsApp or SMS is the chosen channel.
 - Trial 14 days, grace 7 days (subscriptions come in step 3).
 - Customer sessions are cookies (HttpOnly, SameSite=Lax, 30 days) with an Origin check on unsafe methods.
-- The interface is English only. Say if you want Bahasa Indonesia; all strings live in `apps/web/src/copy.ts`.
+- The web interface is English and Bahasa Indonesia (`apps/web/src/i18n/`). It starts in the browser's language and remembers the choice. Server error text is translated in the browser by error code; field-level validation text from the API is still English.
+- OTP.ID: switching to the official SDK is waiting for its README or docs, which this sandbox cannot reach.
 - The logo is a hand-built SVG bunny placeholder. Swap in the real vector mark when you have one.
 
 ## Deferred on purpose

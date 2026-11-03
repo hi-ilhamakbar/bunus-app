@@ -1,4 +1,4 @@
-import { copy } from '../copy';
+import { apiMessage, copy } from '../i18n';
 
 export class ApiError extends Error {
   constructor(
@@ -55,7 +55,7 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
     const err = payload?.error;
     throw new ApiError(
       err?.code ?? 'UNKNOWN',
-      err?.message ?? copy.errors.generic,
+      err?.code ? apiMessage(err.code, err.details, err.message ?? copy.errors.generic) : copy.errors.generic,
       res.status,
       err?.details,
     );

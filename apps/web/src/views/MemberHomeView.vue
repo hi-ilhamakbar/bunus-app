@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import BunusMark from '../components/BunusMark.vue';
+import LocaleSwitch from '../components/LocaleSwitch.vue';
 import { copy, fill } from '../copy';
 import { session } from '../stores/session';
 
@@ -19,7 +20,10 @@ async function logout(): Promise<void> {
         <BunusMark :size="32" />
         <span class="word">Bunus</span>
       </RouterLink>
-      <button type="button" class="btn btn-outline small" @click="logout">{{ copy.member.logout }}</button>
+      <div class="right">
+        <LocaleSwitch />
+        <button type="button" class="btn btn-outline small" @click="logout">{{ copy.member.logout }}</button>
+      </div>
     </header>
 
     <main id="main" class="content" tabindex="-1">
@@ -59,6 +63,11 @@ async function logout(): Promise<void> {
   font-family: var(--font-heading);
   font-weight: 700;
   font-size: 19px;
+}
+.right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .small {
   min-height: 40px;

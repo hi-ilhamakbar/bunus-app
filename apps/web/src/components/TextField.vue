@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { Eye, EyeOff } from 'lucide-vue-next';
+import { copy } from '../i18n';
 
 let counter = 0;
 
@@ -46,7 +47,7 @@ const describedBy = computed(() =>
         type="button"
         class="reveal"
         :aria-pressed="reveal"
-        :aria-label="reveal ? 'Hide password' : 'Show password'"
+        :aria-label="reveal ? copy.common.hidePassword : copy.common.showPassword"
         @click="reveal = !reveal"
       >
         <EyeOff v-if="reveal" :size="20" aria-hidden="true" />
