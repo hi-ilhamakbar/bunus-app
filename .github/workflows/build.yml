@@ -4,6 +4,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,19 +23,29 @@ jobs:
       - run: npm run build
       - run: node scripts/make-api-bundle.mjs
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bunus-web
-          path: apps/web/dist
-          include-hidden-files: true
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bunus-api
-          path: release/bunus-api
-          include-hidden-files: true
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: package-lock
-          path: package-lock.json
+      - name: Zip the build
+        run: |
+          (cd apps/web/dist && zip -qr ../../../bunus-web.zip .)
+          (cd release/bunus-api && zip -qr ../../bunus-api.zip .)
+
+      # One rolling release with the newest build: the easiest place to download it.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-build --cleanup-tag -y || true
+          gh release create latest-build bunus-web.zip bunus-api.zip \
+            --prerelease --title "Latest build" \
+            --notes "Built from ${GITHUB_SHA}. bunus-web.zip goes in public_html, bunus-api.zip is the API app. See docs/deploy-shared-hosting.md."
+
+      # Save the lock file into the repo the first time, so installs are repeatable.
+      - name: Commit package-lock.json
+        run: |
+          if [ -z "$(git ls-files package-lock.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "Add package-lock.json from first successful build"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
